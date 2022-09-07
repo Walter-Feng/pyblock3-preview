@@ -244,7 +244,7 @@ def large_qr(T, left_idx, right_idx=None, mod="qr"):
     if len(left_idx) == T.ndim or len(right_idx) == T.ndim:
         flat_q = T.dq.to_flat()
         flat_qs = np.asarray([[flat_q]], dtype=Q_LABELS_DTYPE)
-        ishapes = np.asarray([[1,]], dtype=SHAPES_DTYPE)
+        ishapes = np.asarray([[1,]], dtype=Sxp.asarray(a.data)HAPES_DTYPE)
         iidxs = np.asarray([0, 1], dtype=INDEX_DTYPE)
         data = np.asarray([1,])
         Q = T.__class__(flat_qs, ishapes, data, idxs=iidxs,
@@ -706,13 +706,13 @@ class LargeFermionTensor(FlatFermionTensor):
         assert q_labels_b.strides == b.shapes.strides
         if setting.DEFAULT_FERMION:
             q_labels, shapes, idxs = backend.gpu.flat_fermion_tensor.tensordot(
-                a.q_labels, a.shapes, a.data.data.ptr, np.array(a.data.shape, dtype=np.int64), a.idxs,
-                q_labels_b, b.shapes, b.data.data.ptr, np.array(b.data.shape, dtype=np.int64), b.idxs,
+                a.q_labels, a.shapes, xp.asarray(a.data).data.ptr, np.array(a.data.shape, dtype=np.int64), a.idxs,
+                q_labels_b, b.shapes, xp.asarray(b.data).data.ptr, np.array(b.data.shape, dtype=np.int64), b.idxs,
                 idxa, idxb, data.data.ptr, a.data.dtype.name, do_fermi=True)
         else:
             q_labels, shapes, idxs = backend.gpu.flat_fermion_tensor.tensordot(
-                a.q_labels, a.shapes, a.data.data.ptr, np.array(a.data.shape, dtype=np.int64), a.idxs,
-                q_labels_b, b.shapes, b.data.data.ptr, np.array(b.data.shape, dtype=np.int64), b.idxs,
+                a.q_labels, a.shapes, xp.asarray(a.data).data.ptr, np.array(a.data.shape, dtype=np.int64), a.idxs,
+                q_labels_b, b.shapes, xp.asarray(b.data).data.ptr, np.array(b.data.shape, dtype=np.int64), b.idxs,
                 idxa, idxb, data.data.ptr, a.data.dtype.name, do_fermi=False)
 
         if len(idxa) == a.ndim and len(idxb) == b.ndim:

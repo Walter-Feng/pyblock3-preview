@@ -708,7 +708,7 @@ gpu_flat_fermion_tensor_tensordot(
         cutensorInitContractionFind(phandle, &find, CUTENSOR_ALGO_DEFAULT));
 
     size_t worksize = 0;
-    HANDLE_ERROR(cutensorContractionGetWorkspace(
+    HANDLE_ERROR(cutensorContractionGetWorkspaceSize(
         phandle, &desc_ctr, &find, CUTENSOR_WORKSPACE_RECOMMENDED, &worksize));
     if (worksize > work->size())
         *work = mgpu::mem_t<uint8_t>(worksize * 2, *pcontext);

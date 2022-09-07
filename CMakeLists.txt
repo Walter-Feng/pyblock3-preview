@@ -180,7 +180,7 @@ ELSE()
 ENDIF()
 
 IF (${USE_GPU})
-    FIND_PATH(CUT_INCLUDE_DIR NAMES cutensor.h HINTS $ENV{CUTENSOR_ROOT}/include /usr/local/include ${PYTHON_INCLUDE_PATH})
+    FIND_PATH(CUT_INCLUDE_DIR NAMES cutensor.h HINTS $ENV{CUTENSOR_ROOT}/include /usr/include /usr/local/include ${PYTHON_INCLUDE_PATH})
     FIND_LIBRARY(CUT_LIB NAMES cutensor
         PATHS $ENV{CUTENSOR_ROOT}/lib/11.0 $ENV{CUTENSOR_ROOT}/lib/11 $ENV{CUTENSOR_ROOT}/lib/10.1
         /usr/local/lib ${PYTHON_LIB_PATH})
