@@ -3,7 +3,7 @@ from . import fermion_setting as setting
 from .fermion import SparseFermionTensor, SubTensor
 from .fermion import Q_LABELS_DTYPE, SHAPES_DTYPE, INDEX_DTYPE, SVD_SCREENING, get_backend
 from .fermion import FlatFermionTensor, _flip_pattern, _flat_fermion_tensor_numpy_func_impls
-from .fermion import _adjust_q_labels, _contract_patterns, _trim_and_renorm_SVD
+from .fermion import _adjust_q_labels, _contract_patterns
 from .fermion import _maybe_transpose_tensor, _gen_null_qr_info, _svd_preprocess
 from .fermion import _absorb_svd, timing
 import numpy as np
@@ -25,6 +25,141 @@ def implements(np_func):
                       if np_func not in _numpy_func_impls else None,
                       _numpy_func_impls[np_func])[1]
 
+def _trim_singular_vals(
+    s_data,
+    cutoff,
+    cutoff_mode,
+    numpy_backend,
+    max_bond=None
+):
+    """Find the number of singular values to keep of ``s`` given ``cutoff`` and
+    ``cutoff_mode``.
+
+    Parameters
+    ----------
+    s_data : a list of array
+        Singular values for different blocks.
+    cutoff : float
+        Cutoff.
+    cutoff_mode : {1, 2, 3, 4, 5, 6}
+        How to perform the trim:
+            - 1: ['abs'], trim values below ``cutoff``
+            - 2: ['rel'], trim values below ``s[0] * cutoff``
+            - 3: ['sum2'], trim s.t. ``sum(s_trim**2) < cutoff``.
+            - 4: ['rsum2'], trim s.t. ``sum(s_trim**2) < sum(s**2) * cutoff``.
+            - 5: ['sum1'], trim s.t. ``sum(s_trim**1) < cutoff``.
+            - 6: ['rsum1'], trim s.t. ``sum(s_trim**1) < sum(s**1) * cutoff``.
+
+    Returns
+    -------
+    n_chis: a list of int
+        The number of remaining singular values for each block
+    """
+    if cutoff_mode in (1, 2):
+        s = None
+        if cutoff_mode == 1:
+            n_chis = [numpy_backend.sum(sblk>cutoff) for sblk in s_data]
+        else:
+            s = numpy_backend.concatenate(s_data)
+            smax = s.max()
+            n_chis = [numpy_backend.sum(sblk>cutoff*smax) for sblk in s_data]
+
+        if max_bond is not None and max_bond>0:
+            n_chi = numpy_backend.sum([x.get() if hasattr(x, 'get') else x for x in n_chis])
+            extra_bonds = n_chi - max_bond
+            if extra_bonds >0:
+                if s is None:
+                    s = numpy_backend.concatenate(s_data)
+                s_ind = numpy_backend.argsort(s)
+                s_ind = [x.get() if hasattr(x, 'get') else x for x in s_ind]
+                ind_map = []
+                for ix, sblk in enumerate(s_data):
+                    ind_map += [ix,] * sblk.size
+                for i in range(extra_bonds):
+                    ind = s_ind[i+s.size-n_chi]
+                    n_chis[ind_map[ind]] -= 1
+
+    elif cutoff_mode in (3, 4, 5, 6):
+        if cutoff_mode in (3, 4):
+            p = 2
+        else:
+            p = 1
+
+        target = cutoff
+
+        s = numpy_backend.concatenate(s_data) ** p
+        if cutoff_mode in (4, 6):
+            target *= numpy_backend.sum(s)
+        s_ind = numpy_backend.argsort(s)
+        s_ind = [x.get() if hasattr(x, 'get') else x for x in s_ind]
+        s_sorted = numpy_backend.cumsum(numpy_backend.sort(s))
+        ind_map = []
+        for ix, sblk in enumerate(s_data):
+            ind_map += [ix,] * sblk.size
+
+        n_chis = [sblk.size for sblk in s_data]
+        ncut = numpy_backend.sum(s_sorted<=target)
+        ncut = ncut.get() if hasattr(ncut, 'get') else ncut
+        if max_bond is not None and max_bond>0:
+            ncut = max(ncut, s.size-max_bond)
+        for i in range(ncut):
+            group_ind = ind_map[s_ind[i]]
+            n_chis[group_ind] -= 1
+    return n_chis
+
+def _renorm_singular_vals(s_data, n_chis, renorm, numpy_backend):
+    """Find the normalization constant for ``s`` such that the new sum squared
+    of the ``n_chi`` largest values equals the sum squared of all the old ones.
+    """
+    s_tot_keep = 0.0
+    s_tot_lose = 0.0
+    for sblk, n_chi in zip(s_data, n_chis):
+        for i in range(sblk.size):
+            s2 = sblk[i]**renorm
+            if not numpy_backend.isnan(s2):
+                if i < n_chi:
+                    s_tot_keep += s2
+                else:
+                    s_tot_lose += s2
+
+    return ((s_tot_keep + s_tot_lose) / s_tot_keep)**(1 / renorm)
+
+def _trim_and_renorm_SVD(
+    s_data,
+    uv_data,
+    numpy_backend,
+    cutoff=SVD_SCREENING,
+    cutoff_mode=3,
+    max_bond=None,
+    renorm=0
+):
+    """Truncate and renormalize the singular values for each block
+    """
+    if isinstance(max_bond, (tuple, list)):
+        if len(max_bond) != len(s_data):
+            raise ValueError("max_bond must be an integer or a tuple "
+                             "with same length as the number of blocks")
+        if len(set(max_bond)) != 1:
+            raise ValueError("max_bond in each dimension must be equal")
+        n_chis = max_bond
+    else:
+
+        n_chis = _trim_singular_vals(s_data, cutoff,
+                                cutoff_mode, max_bond)
+    n_chi = numpy_backend.sum([x.get() if hasattr(x, 'get') else x for x in n_chis])
+    tot_size = numpy_backend.sum([iblk.size for iblk in s_data])
+    if n_chi < tot_size and renorm > 0:
+        renorm_fac = _renorm_singular_vals(s_data,
+                        n_chis, renorm)
+        for sblk in s_data:
+            sblk *= renorm_fac
+
+    for ix, n_chi in enumerate(n_chis):
+        s_data[ix] = s_data[ix][:n_chi]
+        U, VH = uv_data[ix]
+        uv_data[ix] = (U[...,:n_chi], VH[:n_chi,...])
+
+    return s_data, uv_data
 
 NEW_METHODS = [np.transpose, np.tensordot, np.add, np.subtract, np.copy]
 
@@ -81,9 +216,9 @@ def large_svd(T, left_idx, right_idx=None, qpn_partition=None, **opts):
                          axis=1, dtype=int)
     col_shapes = np.prod(new_T.shapes[:,split_ax:],
                          axis=1, dtype=int)
-    s_data =[]
-    uv_data = []
+
     all_maps = []
+    data_blocks = []
     strides = np.ones((new_T.ndim, ), dtype=INDEX_DTYPE)
     np.cumprod(new_T.shape[:0:-1], dtype=INDEX_DTYPE, out=strides[-2::-1])
     xp, _ = get_xp_backend(new_T.use_cupy)
@@ -117,24 +252,44 @@ def large_svd(T, left_idx, right_idx=None, qpn_partition=None, **opts):
             alldatas[(ist, ied, jst, jed)] = new_T.data[idata].reshape(ied - ist, jed - jst)
 
         data = xp.zeros([row_len, col_len], dtype=new_T.dtype)
+
         if data.size == 0:
             continue
         for (ist, ied, jst, jed), val in alldatas.items():
             data[ist:ied, jst:jed] = val
 
-        u, s, v = xp.linalg.svd(data, full_matrices=False)
-        ind = s > SVD_SCREENING
-        s = s[ind]
-        if s.size == 0:
-            continue
-        u = u[:, ind]
-        v = v[ind, :]
-        s_data.append(s)
-        uv_data.append([u, v])
         all_maps.append([sblk_q_label, row_map, col_map])
+        data_blocks.append(data)
+
+    s_data = [None] * len(data_blocks)
+    uv_data = [None] * len(data_blocks)
+
+    for data_blocks_index, data in enumerate(data_blocks):
+        if new_T.use_cupy:
+            stream = xp.cuda.Stream(non_blocking=True)
+
+            with stream:
+                u, s, v = xp.linalg.svd(data, full_matrices=False)
+                non_trivial_svd_indices = s > SVD_SCREENING
+                if len(non_trivial_svd_indices) > 0:
+                    s = s[non_trivial_svd_indices]
+                    u = u[:, non_trivial_svd_indices]
+                    v = v[non_trivial_svd_indices, :]
+                    s_data[data_blocks_index] = s
+                    uv_data[data_blocks_index] = [u, v]
+
+        else:
+            u, s, v = xp.linalg.svd(data, full_matrices=False)
+            non_trivial_svd_indices = s > SVD_SCREENING
+            if len(non_trivial_svd_indices) > 0:
+                s = s[non_trivial_svd_indices]
+                u = u[:, non_trivial_svd_indices]
+                v = v[non_trivial_svd_indices, :]
+                s_data[data_blocks_index] = s
+                uv_data[data_blocks_index] = [u, v]
 
     # truncate the singular values for each block
-    s_data, uv_data = _trim_and_renorm_SVD(s_data, uv_data, **opts)
+    s_data, uv_data = _trim_and_renorm_SVD(s_data, uv_data, xp, **opts)
 
     if absorb is not None:
         for iblk in range(len(uv_data)):
