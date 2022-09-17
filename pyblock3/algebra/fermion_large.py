@@ -65,7 +65,7 @@ def _trim_singular_vals(
             n_chis = [numpy_backend.sum(sblk>cutoff*smax) for sblk in s_data]
 
         if max_bond is not None and max_bond>0:
-            n_chi = numpy_backend.sum([x.get() if hasattr(x, 'get') else x for x in n_chis])
+            n_chi = int(numpy_backend.sum(numpy_backend.asarray([x.get() if hasattr(x, 'get') else x for x in n_chis])))
             extra_bonds = n_chi - max_bond
             if extra_bonds >0:
                 if s is None:
@@ -145,9 +145,9 @@ def _trim_and_renorm_SVD(
     else:
 
         n_chis = _trim_singular_vals(s_data, cutoff,
-                                cutoff_mode, max_bond)
-    n_chi = numpy_backend.sum([x.get() if hasattr(x, 'get') else x for x in n_chis])
-    tot_size = numpy_backend.sum([iblk.size for iblk in s_data])
+                                cutoff_mode, numpy_backend, max_bond=max_bond)
+    n_chi = numpy_backend.sum(numpy_backend.asarray([x.get() if hasattr(x, 'get') else x for x in n_chis]))
+    tot_size = numpy_backend.sum(numpy_backend.asarray([iblk.size for iblk in s_data]))
     if n_chi < tot_size and renorm > 0:
         renorm_fac = _renorm_singular_vals(s_data,
                         n_chis, renorm)
@@ -399,7 +399,7 @@ def large_qr(T, left_idx, right_idx=None, mod="qr"):
     if len(left_idx) == T.ndim or len(right_idx) == T.ndim:
         flat_q = T.dq.to_flat()
         flat_qs = np.asarray([[flat_q]], dtype=Q_LABELS_DTYPE)
-        ishapes = np.asarray([[1,]], dtype=Sxp.asarray(a.data)HAPES_DTYPE)
+        ishapes = np.asarray([[1,]], dtype=SHAPES_DTYPE)
         iidxs = np.asarray([0, 1], dtype=INDEX_DTYPE)
         data = np.asarray([1,])
         Q = T.__class__(flat_qs, ishapes, data, idxs=iidxs,
